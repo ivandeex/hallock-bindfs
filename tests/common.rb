@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 #
-#   Copyright 2006,2007,2008 Martin Pärtel <martin.partel@gmail.com>
+#   Copyright 2006,2007,2008,2009,2010 Martin Pärtel <martin.partel@gmail.com>
 #
 #   This file is part of bindfs.
 #
@@ -31,7 +31,9 @@ TESTDIR_NAME = 'tmp_test_bindfs'
 $only_these_tests = nil
 
 # Prepares a test environment with a mounted directory
-def testenv(testcase_title, bindfs_args, &block)
+def testenv(bindfs_args, &block)
+
+    testcase_title = bindfs_args
 
     return unless $only_these_tests == nil or $only_these_tests.member? testcase_title
 
@@ -42,6 +44,7 @@ def testenv(testcase_title, bindfs_args, &block)
         Dir.mkdir TESTDIR_NAME
     rescue Exception => ex
         $stderr.puts "ERROR creating testdir at #{TESTDIR_NAME}"
+        $stderr.puts ex
         exit! 1
     end
 
@@ -86,8 +89,8 @@ def testenv(testcase_title, bindfs_args, &block)
     end
 
     begin
-        unless system('fusermount -uz mnt')
-            raise Exception.new("fusermount -uz failed with status #{$?}")
+        unless system(umount_cmd + ' mnt')
+            raise Exception.new(umount_cmd + " failed with status #{$?}")
         end
     rescue Exception => ex
         $stderr.puts "ERROR: failed to umount"
@@ -117,6 +120,23 @@ def testenv(testcase_title, bindfs_args, &block)
     end
 end
 
+# Like testenv but skips the test if not running as root
+def root_testenv(bindfs_args, &block)
+    if Process.uid == 0
+        testenv(bindfs_args, &block)
+    else
+        puts "--- #{bindfs_args} ---"
+        puts "[  #{bindfs_args}  ]"
+        puts "SKIP (requires root)"
+    end
+end
+
+def umount_cmd
+    if `which fusermount`.strip.empty?
+    then 'umount'
+    else 'fusermount -uz'
+    end
+end
 
 def assert
     raise Exception.new('test failed') unless yield
