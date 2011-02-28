@@ -230,9 +230,9 @@ mode_t permchain_apply(struct permchain *pc, mode_t tgtmode)
     while (pc != NULL) {
         #if BINDFS_DEBUG
         if (pc->op == 'o')
-            DPRINTF("STAT MODE: %o, op = %c %o\n", tgtmode, pc->op, pc->octal);
+            DPRINTF("STAT MODE: %o, op = %c %o", tgtmode, pc->op, pc->octal);
         else
-            DPRINTF("STAT MODE: %o, op = %c%s\n", tgtmode, pc->op, pc->operands);
+            DPRINTF("STAT MODE: %o, op = %c%s", tgtmode, pc->op, pc->operands);
         #endif
 
         if (pc->op == '\0') {
@@ -308,7 +308,7 @@ mode_t permchain_apply(struct permchain *pc, mode_t tgtmode)
             assert(0);
         }
         pc = pc->next;
-        DPRINTF("       =>: %o\n", tgtmode);
+        DPRINTF("       =>: %o", tgtmode);
     }
     return tgtmode;
 }

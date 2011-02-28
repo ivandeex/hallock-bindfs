@@ -1,3 +1,16 @@
+2010-08-07  Martin Pärtel <martin dot partel at gmail dot com>
+
+	* Improved --help and manpage.
+	* Disabled FUSE attribute cache when using mirroring to avoid
+	  caching the owner of files when observed by a mirrored user.
+	* Added a testcase for the above.
+	* Released 1.9
+
+2010-01-17  Martin Pärtel <martin dot partel at gmail dot com>
+
+	* Added options to control the behavior of chown and chgrp.
+	* Released 1.8.4
+
 2009-03-28  Martin Pärtel <martin dot partel at gmail dot com>
 
 	* Added --ctime-from-mtime. Contributed by Shez.

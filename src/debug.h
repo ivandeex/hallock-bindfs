@@ -24,7 +24,7 @@
 
 #if BINDFS_DEBUG
 #include <stdio.h>
-#define DPRINTF(...) fprintf(stderr, "DEBUG: " __VA_ARGS__)
+#define DPRINTF(fmt, ...) fprintf(stderr, "DEBUG: " fmt "\n", __VA_ARGS__)
 #else
 #define DPRINTF(...)
 #endif
