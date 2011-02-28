@@ -1,5 +1,5 @@
 /*
-    Copyright 2006,2007,2008 Martin Pärtel <martin.partel@gmail.com>
+    Copyright 2006,2007,2008,2009,2010 Martin Pärtel <martin.partel@gmail.com>
 
     This file is part of bindfs.
 
@@ -85,6 +85,18 @@ static struct settings {
 
     struct permchain *create_permchain; /* the --create-with-perms option */
 
+    enum ChownPolicy {
+        CHOWN_NORMAL,
+        CHOWN_IGNORE,
+        CHOWN_DENY
+    } chown_policy;
+
+    enum ChgrpPolicy {
+        CHGRP_NORMAL,
+        CHGRP_IGNORE,
+        CHGRP_DENY
+    } chgrp_policy;
+
     enum ChmodPolicy {
         CHMOD_NORMAL,
         CHMOD_IGNORE,
@@ -111,6 +123,8 @@ static struct settings {
 
 
 /* PROTOTYPES */
+
+static int is_mirroring_enabled();
 
 /* Checks whether the uid is to be the mirrored owner of all files. */
 static int is_mirrored_user(uid_t uid);
@@ -164,6 +178,10 @@ static void atexit_func();
 static int process_option(void *data, const char *arg, int key,
                           struct fuse_args *outargs);
 
+static int is_mirroring_enabled()
+{
+    return settings.num_mirrored_users + settings.num_mirrored_members > 0;
+}
 
 static int is_mirrored_user(uid_t uid)
 {
@@ -217,7 +235,7 @@ static int getattr_common(const char *procpath, struct stat *stbuf)
         stbuf->st_gid = settings.new_gid;
 
     /* Mirrored user? */
-    if (is_mirrored_user(fc->uid)) {
+    if (is_mirroring_enabled() && is_mirrored_user(fc->uid)) {
         stbuf->st_uid = fc->uid;
     } else if (settings.mirrored_users_only && fc->uid != 0) {
         stbuf->st_mode &= ~0777; /* Deny all access if mirror-only and not root */
@@ -376,8 +394,11 @@ static int bindfs_mknod(const char *path, mode_t mode, dev_t rdev)
     if (settings.create_for_gid != -1)
         file_group = settings.create_for_gid;
 
-    if ((file_owner != -1) || (file_group != -1))
-        chown(path, file_owner, file_group);
+    if ((file_owner != -1) || (file_group != -1)) {
+        if (chown(path, file_owner, file_group) == -1) {
+            DPRINTF("Failed to chown new device node (%d)", errno);
+        }
+    }
 
     return 0;
 }
@@ -409,8 +430,11 @@ static int bindfs_mkdir(const char *path, mode_t mode)
     if (settings.create_for_gid != -1)
         file_group = settings.create_for_gid;
 
-    if ((file_owner != -1) || (file_group != -1))
-        chown(path, file_owner, file_group);
+    if ((file_owner != -1) || (file_group != -1)) {
+        if (chown(path, file_owner, file_group) == -1) {
+            DPRINTF("Failed to chown new directory (%d)", errno);
+        }
+    }
 
     return 0;
 }
@@ -465,8 +489,11 @@ static int bindfs_symlink(const char *from, const char *to)
     if (settings.create_for_gid != -1)
         file_group = settings.create_for_gid;
 
-    if ((file_owner != -1) || (file_group != -1))
-        lchown(to, file_owner, file_group);
+    if ((file_owner != -1) || (file_group != -1)) {
+        if (lchown(to, file_owner, file_group) == -1) {
+            DPRINTF("Failed to lchown new symlink (%d)", errno);
+        }
+    }
 
     return 0;
 }
@@ -550,15 +577,36 @@ static int bindfs_chown(const char *path, uid_t uid, gid_t gid)
 {
     int res;
 
-    if ((uid != -1 && settings.new_uid != -1) ||
-        (gid != -1 && settings.new_gid != -1))
-        return -EPERM;
+    if (uid != -1) {
+        switch (settings.chown_policy) {
+        case CHOWN_NORMAL:
+            break;
+        case CHOWN_IGNORE:
+            uid = -1;
+            break;
+        case CHOWN_DENY:
+            return -EPERM;
+        }
+    }
+    
+    if (gid != -1) {
+        switch (settings.chgrp_policy) {
+        case CHGRP_NORMAL:
+            break;
+        case CHGRP_IGNORE:
+            gid = -1;
+            break;
+        case CHGRP_DENY:
+            return -EPERM;
+        }
+    }
 
-    path = process_path(path);
-
-    res = lchown(path, uid, gid);
-    if (res == -1)
-        return -errno;
+    if (uid != -1 || gid != -1) {
+        path = process_path(path);
+        res = lchown(path, uid, gid);
+        if (res == -1)
+            return -errno;
+    }
 
     return 0;
 }
@@ -630,8 +678,11 @@ static int bindfs_create(const char *path, mode_t mode, struct fuse_file_info *f
     if (settings.create_for_gid != -1)
         file_group = settings.create_for_gid;
 
-    if ((file_owner != -1) || (file_group != -1))
-        chown(path, file_owner, file_group);
+    if ((file_owner != -1) || (file_group != -1)) {
+        if (chown(path, file_owner, file_group) == -1) {
+            DPRINTF("Failed to chown new file (%d)", errno);
+        }
+    }
 
     fi->fh = fd;
     return 0;
@@ -724,7 +775,7 @@ static int bindfs_fsync(const char *path, int isdatasync,
 static int bindfs_setxattr(const char *path, const char *name, const char *value,
                            size_t size, int flags)
 {
-    DPRINTF("setxattr %s %s=%s\n", path, name, value);
+    DPRINTF("setxattr %s %s=%s", path, name, value);
     
     if (settings.xattr_policy == XATTR_READ_ONLY)
         return -EACCES;
@@ -745,7 +796,7 @@ static int bindfs_getxattr(const char *path, const char *name, char *value,
 {
     int res;
 
-    DPRINTF("getxattr %s %s\n", path, name);
+    DPRINTF("getxattr %s %s", path, name);
     
     path = process_path(path);
     /* fuse checks permissions for us */
@@ -763,7 +814,7 @@ static int bindfs_listxattr(const char *path, char *list, size_t size)
 {
     int res;
 
-    DPRINTF("listxattr %s\n", path);
+    DPRINTF("listxattr %s", path);
     
     path = process_path(path);
     /* fuse checks permissions for us */
@@ -779,7 +830,7 @@ static int bindfs_listxattr(const char *path, char *list, size_t size)
 
 static int bindfs_removexattr(const char *path, const char *name)
 {
-    DPRINTF("removexattr %s %s\n", path, name);
+    DPRINTF("removexattr %s %s", path, name);
 
     if (settings.xattr_policy == XATTR_READ_ONLY)
         return -EACCES;
@@ -865,9 +916,19 @@ static void print_usage(const char *progname)
            "  --create-for-group        New files owned by specified group. *\n"
            "  --create-with-perms       Alter permissions of new files.\n"
            "\n"
+           "Chown policy:\n"
+           "  --chown-normal            Try to chown the original files (the default).\n"
+           "  --chown-ignore            Have all chowns fail silently.\n"
+           "  --chown-deny              Have all chowns fail with 'permission denied'.\n"
+           "\n"
+           "Chgrp policy:\n"
+           "  --chgrp-normal            Try to chgrp the original files (the default).\n"
+           "  --chgrp-ignore            Have all chgrps fail silently.\n"
+           "  --chgrp-deny              Have all chgrps fail with 'permission denied'.\n"
+           "\n"
            "Chmod policy:\n"
            "  --chmod-normal            Try to chmod the original files (the default).\n"
-           "  --chmod-ignore            Have all chmods to fail silently.\n"
+           "  --chmod-ignore            Have all chmods fail silently.\n"
            "  --chmod-deny              Have all chmods fail with 'permission denied'.\n"
            "  --chmod-allow-x           Allow changing file execute bits in any case.\n"
            "\n"
@@ -882,6 +943,7 @@ static void print_usage(const char *progname)
            "\n"
            "FUSE options:\n"
            "  -o opt[,opt,...]          Mount options.\n"
+           "  -r      -o ro             Mount strictly read-only.\n"
            "  -d      -o debug          Enable debug output (implies -f).\n"
            "  -f                        Foreground operation.\n"
            "  -s                        Disable multithreaded operation.\n"
@@ -911,6 +973,12 @@ enum OptionKey {
     OPTKEY_VERSION,
     OPTKEY_CREATE_AS_USER,
     OPTKEY_CREATE_AS_MOUNTER,
+    OPTKEY_CHOWN_NORMAL,
+    OPTKEY_CHOWN_IGNORE,
+    OPTKEY_CHOWN_DENY,
+    OPTKEY_CHGRP_NORMAL,
+    OPTKEY_CHGRP_IGNORE,
+    OPTKEY_CHGRP_DENY,
     OPTKEY_CHMOD_NORMAL,
     OPTKEY_CHMOD_IGNORE,
     OPTKEY_CHMOD_DENY,
@@ -944,6 +1012,26 @@ static int process_option(void *data, const char *arg, int key,
         return 0;
     case OPTKEY_CREATE_AS_MOUNTER:
         settings.create_policy = CREATE_AS_MOUNTER;
+        return 0;
+
+    case OPTKEY_CHOWN_NORMAL:
+        settings.chown_policy = CHOWN_NORMAL;
+        return 0;
+    case OPTKEY_CHOWN_IGNORE:
+        settings.chown_policy = CHOWN_IGNORE;
+        return 0;
+    case OPTKEY_CHOWN_DENY:
+        settings.chown_policy = CHOWN_DENY;
+        return 0;
+
+    case OPTKEY_CHGRP_NORMAL:
+        settings.chgrp_policy = CHGRP_NORMAL;
+        return 0;
+    case OPTKEY_CHGRP_IGNORE:
+        settings.chgrp_policy = CHGRP_IGNORE;
+        return 0;
+    case OPTKEY_CHGRP_DENY:
+        settings.chgrp_policy = CHGRP_DENY;
         return 0;
 
     case OPTKEY_CHMOD_NORMAL:
@@ -1034,6 +1122,12 @@ int main(int argc, char *argv[])
         OPT_OFFSET2("--create-for-user=%s", "create-for-user=%s", create_for_user, -1),
         OPT_OFFSET2("--create-for-group=%s", "create-for-group=%s", create_for_group, -1),
         OPT_OFFSET2("--create-with-perms=%s", "create-with-perms=%s", create_with_perms, -1),
+        OPT2("--chown-normal", "chown-normal", OPTKEY_CHOWN_NORMAL),
+        OPT2("--chown-ignore", "chown-ignore", OPTKEY_CHOWN_IGNORE),
+        OPT2("--chown-deny", "chown-deny", OPTKEY_CHOWN_DENY),
+        OPT2("--chgrp-normal", "chgrp-normal", OPTKEY_CHGRP_NORMAL),
+        OPT2("--chgrp-ignore", "chgrp-ignore", OPTKEY_CHGRP_IGNORE),
+        OPT2("--chgrp-deny", "chgrp-deny", OPTKEY_CHGRP_DENY),
         OPT2("--chmod-normal", "chmod-normal", OPTKEY_CHMOD_NORMAL),
         OPT2("--chmod-ignore", "chmod-ignore", OPTKEY_CHMOD_IGNORE),
         OPT2("--chmod-deny", "chmod-deny", OPTKEY_CHMOD_DENY),
@@ -1063,6 +1157,8 @@ int main(int argc, char *argv[])
     settings.mntdest = NULL;
     settings.create_policy = (getuid() == 0) ? CREATE_AS_USER : CREATE_AS_MOUNTER;
     settings.create_permchain = permchain_create();
+    settings.chown_policy = CHOWN_NORMAL;
+    settings.chgrp_policy = CHGRP_NORMAL;
     settings.chmod_policy = CHMOD_NORMAL;
     settings.chmod_allow_x = 0;
     settings.xattr_policy = XATTR_READ_WRITE;
@@ -1194,6 +1290,12 @@ int main(int argc, char *argv[])
 
     /* We want the kernel to do our access checks for us based on what getattr gives it. */
     fuse_opt_add_arg(&args, "-odefault_permissions");
+    
+    /* We need to disable the attribute cache whenever two users
+       can see different attributes. For now, only mirroring can do that. */
+    if (is_mirroring_enabled()) {
+        fuse_opt_add_arg(&args, "-oattr_timeout=0");
+    }
 
     /* If the mount source and destination directories are the same
        then don't require that the directory be empty. */

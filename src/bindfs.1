@@ -42,7 +42,10 @@ See \fB\%PERMISSION \%SPECIFICATION\fP below for details.
 
 This only affects how the permission bits of existing files are altered
 when shown in the mounted directory. You can use \-\-create\-with\-perms to
-change the permissions newly created files get in the source directory.
+change the permissions that newly created files get in the source directory.
+
+Note that, as usual, the root user isn't bound by the permissions set here.
+You can get a truly read-only mount by using \fB-r\fP.
 
 .TP
 .B \-m, \-\-mirror=\fIusers\fP, \-o mirror=...
@@ -104,11 +107,47 @@ them completely.
 See \fB\%PERMISSION \%SPECIFICATION\fP below for details.
 
 
+.SH CHOWN/CHGRP POLICY
+The behaviour on chown/chgrp calls can be changed. By default they are passed
+through to the source directory even if bindfs is set to show
+a fake owner/group. A chown/chgrp call will only succeed if the user has
+enough mirrored permissions to chmod the mirrored file AND
+the mounter has enough permissions to chmod the real file.
+
+.TP
+.B \-\-chown\-normal, \-o chown\-normal
+Tries to chown the underlying file. This is the default.
+
+.TP
+.B \-\-chown\-ignore, \-o chown\-ignore
+Lets chown succeed (if the user has enough mirrored permissions)
+but actually does nothing. A combined chown/chgrp is effectively turned
+into a chgrp-only request.
+
+.TP
+.B \-\-chown\-deny, \-o chown\-deny
+Makes chown always fail with a 'permission denied' error.
+A combined chown/chgrp request will fail as well.
+
+.TP
+.B \-\-chgrp\-normal, \-o chgrp\-normal
+Tries to chgrp the underlying file. This is the default.
+
+.TP
+.B \-\-chgrp\-ignore, \-o chgrp\-ignore
+Lets chgrp succeed (if the user has enough mirrored permissions)
+but actually does nothing. A combined chown/chgrp is effectively turned into a
+chown-only request.
+
+.TP
+.B \-\-chgrp\-deny, \-o chgrp\-deny
+Makes chgrp always fail with a 'permission denied' error.
+A combined chown/chgrp request will fail as well.
+
+
 .SH CHMOD POLICY
 Chmod calls are forwarded to the source directory by default.
 This may cause unexpected behaviour if bindfs is altering permission bits.
-Note that regardless of the options given below, if the \fB\-u\fP and \fB\-g\fP
-options are given then chown and chgrp respectively will always fail.
 
 .TP
 .B \-\-chmod\-normal, \-o chmod\-normal
@@ -124,7 +163,7 @@ but actually does nothing.
 
 .TP
 .B \-\-chmod\-deny, \-o chmod\-deny
-Has chmod always fail with a 'permission denied' error.
+Makes chmod always fail with a 'permission denied' error.
 
 .TP
 .B \-\-chmod\-allow\-x, \-o chmod\-allow\-x
@@ -165,7 +204,7 @@ Recall that a unix file has three standard timestamps:
 \fBctime\fP (last content or metadata (inode) change time)
 
 It may sometimes be useful to alter these timestamps, but care should be taken
-not to cause programs (e.g. backup jobs) miss important changes.
+not to cause programs (e.g. backup jobs) to miss important changes.
 
 .TP
 .B \-\-ctime\-from-mtime, \-o ctime\-from\-mtime
@@ -181,6 +220,13 @@ will be reflected in a mirrored file's ctime.
 Fuse options.
 
 .TP
+.B \-r, \-o ro
+Make the mount strictly read-only.
+This even prevents root from writing to it.
+If this is all you need, then (since Linux 2.6.26) you can get a
+more efficent mount with \fBmount \-\-bind\fP and then \fBmount \-o remount,ro\fP.
+
+.TP
 .B \-d, \-o debug
 Enable debug output (implies \-f).
 
@@ -190,7 +236,7 @@ Foreground operation.
 
 .TP
 .B \-s
-Disable multithreaded operation.
+Disable multithreaded operation. bindfs should be thread-safe.
 
 
 .SH PERMISSION SPECIFICATION
@@ -273,6 +319,9 @@ separate arguments to perms, because the comma is an option separator in
 Setuid and setgid bits have no effect inside the mount.
 This is a necessary security feature of FUSE.
 
+MacFuse caches file contents by default.
+This means that changes in source files are not always immediately visible under the mount point.
+\fB\-o nolocalcaches\fP can be used to disable the cache.
 
 .SH BUGS
 
